@@ -1,0 +1,109 @@
+# app.py - For Render.com deployment
+from flask import Flask, jsonify, request
+import os
+import sys
+import logging
+from datetime import datetime
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = Flask(__name__)
+
+# Your comment processing logic
+def process_comments(event, context=None):
+    """
+    Process YouTube comments
+    """
+    try:
+        # Mock implementation - replace with your actual logic
+        logger.info(f"Processing event: {event}")
+        
+        # Example processing
+        new_comments = ["Great video!", "Thanks for sharing"]
+        replies_posted = 1
+        
+        return {
+            'processed': len(new_comments),
+            'replied': replies_posted,
+            'next_run_scheduled': True,
+            'statusCode': 200
+        }
+    except Exception as e:
+        logger.error(f"Error in process_comments: {str(e)}")
+        return {
+            'error': str(e),
+            'statusCode': 500
+        }
+
+@app.route('/')
+def home():
+    return jsonify({
+        'service': 'YouTube Bot',
+        'version': '1.0.0',
+        'status': 'running',
+        'endpoints': [
+            {'path': '/', 'method': 'GET', 'description': 'Service info'},
+            {'path': '/health', 'method': 'GET', 'description': 'Health check'},
+            {'path': '/process-comments', 'method': 'GET/POST', 'description': 'Process YouTube comments'},
+            {'path': '/webhook/youtube', 'method': 'POST', 'description': 'YouTube webhook endpoint'}
+        ],
+        'timestamp': datetime.now().isoformat()
+    })
+
+@app.route('/health')
+def health():
+    return jsonify({
+        'status': 'healthy',
+        'service': 'youtube-bot',
+        'timestamp': datetime.now().isoformat()
+    })
+
+@app.route('/process-comments', methods=['GET', 'POST'])
+def process_comments_endpoint():
+    """
+    Endpoint to trigger comment processing
+    """
+    try:
+        # Get request data if POST
+        data = None
+        if request.method == 'POST':
+            data = request.json
+        
+        # Process comments
+        result = process_comments(data or {}, None)
+        
+        # Return result
+        return jsonify(result), result.get('statusCode', 200)
+        
+    except Exception as e:
+        logger.error(f"Error in process_comments_endpoint: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/webhook/youtube', methods=['POST'])
+def youtube_webhook():
+    """
+    Webhook endpoint for YouTube push notifications
+    """
+    try:
+        data = request.json
+        logger.info(f"Received YouTube webhook: {data}")
+        
+        # Process the webhook
+        result = process_comments(data, None)
+        
+        return jsonify({
+            'received': True,
+            'processed': result.get('processed', 0),
+            'timestamp': datetime.now().isoformat()
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error in webhook: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# For local testing
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port, debug=True)
