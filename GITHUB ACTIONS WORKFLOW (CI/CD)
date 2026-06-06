@@ -1,0 +1,210 @@
+
+name: CI/CD Pipeline - YouTube AI Bot
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  PYTHON_VERSION: '3.11'
+  RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+
+jobs:
+  # JOB 1: Test
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Cache pip packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov flake8 black
+      
+      - name: Lint with flake8
+        run: |
+          flake8 app.py --count --max-complexity=10 --max-line-length=127 --statistics
+      
+      - name: Check formatting with black
+        run: |
+          black --check app.py
+      
+      - name: Run tests with coverage
+        run: |
+          pytest tests/ --cov=app --cov-report=xml
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.TEST_YOUTUBE_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.TEST_DEEPSEEK_API_KEY }}
+      
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          flags: unittests
+      
+      - name: Security scan with Bandit
+        run: |
+          bandit -r app.py -f json -o bandit-report.json
+      
+      - name: Upload security report
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: bandit-report.json
+
+  # JOB 2: Build and Test Docker
+  docker-build:
+    name: Build and Test Docker Image
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: youtube-bot:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
+      - name: Run Docker container test
+        run: |
+          docker run --rm -d --name test-bot -p 5000:5000 youtube-bot:test
+          sleep 5
+          curl -f http://localhost:5000/health || exit 1
+          docker stop test-bot
+      
+      - name: Scan Docker image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: youtube-bot:test
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+      
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+
+  # JOB 3: Deploy to Render.com
+  deploy-render:
+    name: Deploy to Render.com
+    runs-on: ubuntu-latest
+    needs: [test, docker-build]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+      - name: Trigger Render.com Deployment
+        run: |
+          curl -X POST ${{ env.RENDER_DEPLOY_HOOK }}
+      
+      - name: Wait for deployment
+        run: |
+          echo "Waiting for deployment to complete..."
+          sleep 30
+      
+      - name: Verify deployment
+        run: |
+          curl -f https://your-bot-name.onrender.com/health || exit 1
+      
+      - name: Notify on success
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '✅ Deployment Successful',
+              body: 'Latest commit ${{ github.sha }} deployed to Render.com'
+            })
+
+  # JOB 4: Deploy to AWS (Optional)
+  deploy-aws:
+    name: Deploy to AWS ECS
+    runs-on: ubuntu-latest
+    needs: [test, docker-build]
+    if: false  # Disable until you have AWS credentials
+    environment: production
+    
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      - name: Build and push to ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: youtube-bot
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+      
+      - name: Update ECS service
+        run: |
+          aws ecs update-service --cluster youtube-cluster --service youtube-bot --force-new-deployment
+
+  # JOB 5: Create Release
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [deploy-render]
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Release v${{ github.run_number }}
+          body: |
+            ## YouTube AI Comment Bot - Release v${{ github.run_number }}
+            
+            ### Changes in this release:
+            - Latest commits: ${{ github.sha }}
+            - Deployed to Render.com
+            - All tests passing
+            
+            ### Tech Stack:
+            - Python 3.11 + Flask
+            - DeepSeek AI API
+            - YouTube Data API v3
+            - Docker + PostgreSQL
+          
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
