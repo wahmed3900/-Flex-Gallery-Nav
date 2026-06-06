@@ -1,0 +1,24 @@
+# Fixed indentation and added placeholder functions
+def is_safe_to_reply(comment):
+    return "scam" not in comment.lower() and "fake news" not in comment.lower()
+
+def is_genuine_question(comment):
+    return "?" in comment or any(word in comment.lower() for word in ["how", "what", "can you"])
+
+def generate_friendly_reply(comment, user):
+    return f"Thanks for asking! Here's help with '{comment}' - check our tutorial!"
+
+test_comments = [
+    "how do I start with my phone?",
+    "this is a scam",
+    "I need a side hustle no experience",
+    "fake news",
+    "can you teach me?",
+]
+
+for comment in test_comments:
+    if is_safe_to_reply(comment) and is_genuine_question(comment):
+        reply = generate_friendly_reply(comment, "testuser")
+        print(f"Comment: {comment}\nReply: {reply}\n{'-'*40}")
+    else:
+        print(f"✖ Skipped: {comment}\n")

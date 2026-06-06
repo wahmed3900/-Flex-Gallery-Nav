@@ -1,0 +1,116 @@
+# youtube_friendly_bot.py
+# Safe, human-like engagement bot — preserves DM CTA without spam flags
+
+import time
+import random
+from typing import List, Dict
+
+# ========== SAFETY SETTINGS ==========
+MIN_DELAY_MINUTES = 5      # Min wait between replies
+MAX_DELAY_MINUTES = 15     # Max wait between replies
+MAX_REPLIES_PER_DAY = 12   # Hard cap to avoid detection
+MAX_REPLIES_PER_VIDEO = 8  # Per video limit
+
+# ========== FRIENDLY REPLY TEMPLATES ==========
+# All keep the DM CTA intact, but vary wording naturally
+FRIENDLY_REPLIES = [
+    "Great question! 🙌 I started the same way — just my phone. Happy to share what worked. Send me a DM?",
+    "Thanks for asking! ✨ No experience needed at all. Want me to show you how I started? DM me :)",
+    "Honestly? I was skeptical too. But it's working with just my phone. DM me if you want the breakdown.",
+    "You can definitely do this! Zero fluff, I promise. Curious? Shoot me a DM and I'll explain.",
+    "Love the curiosity! Took me 3 days to get started. DM me and I'll send you the first step.",
+    "Appreciate you asking! Most people overcomplicate it. DM me — I'll keep it simple.",
+    "Short answer: yes, just your phone. Long answer? DM me and I'll walk you through it.",
+    "You're asking the right question. DM me — I'll show you exactly how I started with $0.",
+]
+
+# Simulated comment fetcher (replace with YouTube API)
+class SafeYouTubeReader:
+    def get_comment_queue(self, video_id: str) -> List[Dict]:
+        # In real implementation: fetch recent comments, avoid ones you already replied to
+        return [
+            {"author": "curious_mike", "text": "can I really do this with just my phone?", "time": "recent"},
+            {"author": "jenny_saves", "text": "no experience? seriously how?", "time": "recent"},
+            {"author": "busy_dad", "text": "I need a side hustle but I'm clueless", "time": "recent"},
+        ]
+
+# Simple intent check — won't reply to negative or irrelevant comments
+def is_genuine_question(comment_text: str) -> bool:
+    positive_signals = ["how", "start", "phone", "side hustle", "experience", "work", "money", "curious", "really"]
+    negative_signals = ["scam", "fake", "hate", "stupid", "bullshit", "lies"]
+    
+    text_lower = comment_text.lower()
+    if any(sig in text_lower for sig in negative_signals):
+        return False
+    return any(sig in text_lower for sig in positive_signals)
+
+# Pick a random friendly reply
+def get_friendly_reply(username: str) -> str:
+    template = random.choice(FRIENDLY_REPLIES)
+    # Some templates already have @, some don't
+    if "@" not in template and username:
+        return f"@{username} {template}"
+    return template
+
+# The main safe bot
+class YouTubeFriendlyBot:
+    def __init__(self):
+        self.reply_count_today = 0
+        self.replied_users = set()
+        self.replied_comments = set()
+    
+    def can_reply(self) -> bool:
+        return self.reply_count_today < MAX_REPLIES_PER_DAY
+    
+    def post_reply_safely(self, comment: Dict, reply_text: str):
+        """
+        Replace this with actual YouTube API call:
+        - Use youtube.commentThreads().insert()
+        - Add random delay BEFORE calling this
+        """
+        print(f"💬 Replying to @{comment['author']}:")
+        print(f"   → {reply_text}\n")
+        # In production: YouTube API comment insert here
+        self.reply_count_today += 1
+    
+    def run_once(self, video_id: str):
+        if not self.can_reply():
+            print("⚠️ Daily reply limit reached. Stopping.")
+            return
+        
+        comments = SafeYouTubeReader().get_comment_queue(video_id)
+        replies_made = 0
+        
+        for comment in comments:
+            if not self.can_reply():
+                break
+            if replies_made >= MAX_REPLIES_PER_VIDEO:
+                break
+            
+            author = comment["author"]
+            comment_id = comment.get("id", comment["text"][:20])
+            
+            if author in self.replied_users or comment_id in self.replied_comments:
+                continue
+            
+            if is_genuine_question(comment["text"]):
+                reply = get_friendly_reply(author)
+                self.post_reply_safely(comment, reply)
+                self.replied_users.add(author)
+                self.replied_comments.add(comment_id)
+                replies_made += 1
+                
+                # Human-like delay between replies
+                delay_seconds = random.randint(MIN_DELAY_MINUTES * 60, MAX_DELAY_MINUTES * 60)
+                print(f"⏳ Waiting {delay_seconds//60} minutes before next reply...\n")
+                time.sleep(delay_seconds)
+        
+        print(f"✅ Done. Made {replies_made} replies today.")
+
+# ========== RUN SAFELY ==========
+if __name__ == "__main__":
+    bot = YouTubeFriendlyBot()
+    
+    # Run once per day, or schedule with a cron job
+    video_id = "your_ai_business_video_id"  # Replace with your video ID
+    bot.run_once(video_id)

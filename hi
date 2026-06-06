@@ -1,0 +1,25 @@
+# app.py
+from flask import Flask, jsonify
+import datetime
+
+app = Flask(__name__)
+
+def process_comments(event, context=None):
+    # Mock data for testing
+    new_comments = ["Great video!", "Thanks for sharing"]
+    replies_posted = 1
+    
+    return {
+        'processed': len(new_comments),
+        'replied': replies_posted,
+        'next_run_scheduled': True,
+        'timestamp': str(datetime.datetime.now())
+    }
+
+@app.route('/process', methods=['GET'])
+def process_endpoint():
+    result = process_comments({}, None)
+    return jsonify(result)
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)

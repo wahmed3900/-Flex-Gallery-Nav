@@ -1,0 +1,3 @@
+# In your local project folder
+echo "flask
+gunicorn" > requirements.txt

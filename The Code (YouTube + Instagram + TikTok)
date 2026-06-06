@@ -1,0 +1,186 @@
+# universal_friendly_bot.py
+# GPT-4 powered | Safe for YouTube, Instagram, TikTok
+
+import time
+import random
+import os
+from openai import OpenAI
+
+# ========== CONFIGURATION ==========
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=OPENAI_API_KEY)
+
+# Safety limits
+MIN_DELAY_MINUTES = 5
+MAX_DELAY_MINUTES = 15
+MAX_REPLIES_PER_DAY = 12
+SKIP_CHANCE = 0.20  # 20% chance to skip a qualifying comment (looks human)
+
+# Your DM CTA (will be naturally integrated by GPT-4)
+DM_CTA = "Send me a DM if you want me to show you how I started"
+
+# ========== GPT-4 REPLY GENERATOR ==========
+def generate_friendly_reply(comment_text: str, author: str) -> str:
+    """Generate a unique, human reply using GPT-4"""
+    
+    prompt = f"""
+You are a helpful, friendly YouTuber/creator replying to a comment.
+
+COMMENT from @{author}: "{comment_text}"
+
+RULES:
+- Be warm, encouraging, and conversational
+- Keep it under 120 characters (mobile-friendly)
+- NO links, NO hashtags, NO all-caps
+- Naturally include this CTA (but rephrase it slightly each time):
+  "{DM_CTA}"
+- Use occasional emojis (1-2 max) like 🙌 ✨ 👍
+- Sound like a real person, not a bot
+- Never be salesy or pushy
+
+Reply directly to @{author}:
+"""
+    
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",  # cheaper, fast, good enough
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=60,
+        temperature=0.9  # higher creativity = less repetitive
+    )
+    
+    reply = response.choices[0].message.content.strip()
+    
+    # Ensure CTA is present (fallback)
+    if "DM" not in reply and "dm" not in reply:
+        reply += f" {DM_CTA}"
+    
+    return reply
+
+# ========== PLATFORM-SAFE CHECKERS ==========
+def is_safe_to_reply(comment_text: str) -> bool:
+    """Filter out negative/spammy comments"""
+    unsafe = ["scam", "fake", "hate", "stupid", "bullshit", "report", "block", "spam"]
+    text_lower = comment_text.lower()
+    
+    if any(word in text_lower for word in unsafe):
+        return False
+    
+    # Skip random chance
+    if random.random() < SKIP_CHANCE:
+        return False
+    
+    return True
+
+def is_genuine_question(comment_text: str) -> bool:
+    """Only reply to real engagement"""
+    signals = ["how", "start", "phone", "side hustle", "experience", "work", "money", "curious", "really", "help", "advice", "tips", "please", "question"]
+    text_lower = comment_text.lower()
+    return any(sig in text_lower for sig in signals)
+
+# ========== PLATFORM ADAPTERS ==========
+class YouTubeAdapter:
+    def post_reply(self, comment_id: str, reply_text: str):
+        # YouTube API: comments.insert()
+        print(f"[YouTube] Replied to comment {comment_id}: {reply_text}")
+    
+    def get_new_comments(self, video_id: str):
+        # Fetch comments via YouTube Data API v3
+        pass
+
+class InstagramAdapter:
+    def post_reply(self, comment_id: str, reply_text: str):
+        # Instagram Graph API or instagrapi
+        print(f"[Instagram] Replied to comment {comment_id}: {reply_text}")
+    
+    def get_new_comments(self, media_id: str):
+        pass
+
+class TikTokAdapter:
+    def post_reply(self, comment_id: str, reply_text: str):
+        # TikTok Business API or PyTikTok
+        print(f"[TikTok] Replied to comment {comment_id}: {reply_text}")
+    
+    def get_new_comments(self, video_id: str):
+        pass
+
+# ========== MAIN BOT ENGINE ==========
+class UniversalFriendlyBot:
+    def __init__(self, platform: str, content_id: str):
+        self.platform = platform
+        self.content_id = content_id
+        self.reply_count = 0
+        self.replied_comment_ids = set()
+        
+        # Select platform adapter
+        if platform == "youtube":
+            self.adapter = YouTubeAdapter()
+        elif platform == "instagram":
+            self.adapter = InstagramAdapter()
+        elif platform == "tiktok":
+            self.adapter = TikTokAdapter()
+        else:
+            raise ValueError("Platform must be youtube, instagram, or tiktok")
+    
+    def can_reply(self) -> bool:
+        return self.reply_count < MAX_REPLIES_PER_DAY
+    
+    def run_once(self):
+        print(f"\n🚀 Starting {self.platform.upper()} bot — Safe Mode ON")
+        print(f"📊 Daily limit: {MAX_REPLIES_PER_DAY} replies")
+        
+        # Fetch comments (implement based on platform)
+        comments = self.adapter.get_new_comments(self.content_id)
+        
+        for comment in comments[:MAX_REPLIES_PER_DAY * 2]:  # Fetch extra to filter
+            if not self.can_reply():
+                print("Daily limit reached. Stopping.")
+                break
+            
+            comment_id = comment["id"]
+            comment_text = comment["text"]
+            author = comment["author"]
+            
+            # Skip if already replied
+            if comment_id in self.replied_comment_ids:
+                continue
+            
+            # Safety filters
+            if not is_safe_to_reply(comment_text):
+                print(f"⏭️ Skipped unsafe comment from @{author}")
+                continue
+            
+            if not is_genuine_question(comment_text):
+                print(f"⏭️ Skipped non-question from @{author}")
+                continue
+            
+            # Generate GPT-4 reply
+            reply = generate_friendly_reply(comment_text, author)
+            
+            # Post the reply
+            self.adapter.post_reply(comment_id, reply)
+            self.replied_comment_ids.add(comment_id)
+            self.reply_count += 1
+            
+            print(f"✅ Replied to @{author} (reply #{self.reply_count}): {reply}")
+            
+            # Human-like delay
+            if self.can_reply():
+                delay = random.randint(MIN_DELAY_MINUTES * 60, MAX_DELAY_MINUTES * 60)
+                print(f"⏳ Sleeping {delay//60} minutes...")
+                time.sleep(delay)
+        
+        print(f"\n🏁 Done. Made {self.reply_count} replies on {self.platform}.")
+
+# ========== RUN ==========
+if __name__ == "__main__":
+    # Example: Run for YouTube
+    bot = UniversalFriendlyBot(
+        platform="youtube",  # or "instagram" / "tiktok"
+        content_id="your_video_id_here"
+    )
+    bot.run_once()
+    
+    # Optional: Run for multiple platforms
+    # for platform, content_id in [("youtube", "vid123"), ("instagram", "media456")]:
+    #     bot = UniversalFriendlyBot(platform, content_id)
+    #     bot.run_once()
