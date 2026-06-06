@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: youtube_bot_db
+    environment:
+      POSTGRES_USER: botuser
+      POSTGRES_PASSWORD: botpass123
+      POSTGRES_DB: youtube_bot
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U botuser"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - bot_network
+
+  # Redis for caching (optional, for rate limiting)
+  redis:
+    image: redis:7-alpine
+    container_name: youtube_bot_redis
+    ports:
+      - "6379:6379"
+    networks:
+      - bot_network
+
+  # YouTube AI Comment Bot
+  bot:
+    build: .
+    container_name: youtube_ai_bot
+    environment:
+      - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DATABASE_URL=postgresql://botuser:botpass123@postgres:5432/youtube_bot
+      - REDIS_URL=redis://redis:6379
+      - PORT=5000
+    ports:
+      - "5000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - bot_network
+    restart: unless-stopped
+
+  # Optional: Prometheus for monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: bot_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - bot_network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  bot_network:
+    driver: bridge
